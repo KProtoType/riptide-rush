@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Riptide Rush — Photoreal 3D Jet-Ski Racing</title>
+  <meta name="description" content="Riptide Rush: Wave Race meets Hydro Thunder. Synchronized 3D Gerstner ocean waves, floating jump ramps, mid-air stunts, Hydro Nitro, red/yellow slalom buoys, 7 AI rivals, and 3 photoreal venues.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Riptide Rush">
+  <meta name="theme-color" content="#041322">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="src/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="ui"></div>
+
+  <div id="gfx-bar" aria-label="Live Weather and Quality Controls">
+    <button type="button" class="gfx-btn" id="gfx-weather" title="Cycle Weather (Key: O)">WEATHER: SUNNY</button>
+    <button type="button" class="gfx-btn" id="gfx-quality" title="Cycle Graphics Quality (Key: U)">QUALITY: HIGH</button>
+    <button type="button" class="gfx-btn" id="gfx-audio" title="Mute / Unmute Audio (Key: M)">AUDIO: ON</button>
+    <span class="gfx-fps" id="gfx-fps">-- FPS</span>
+  </div>
+
+  <div id="boot">
+    <div class="bootbox">
+      <div class="bootlogo">RIPTIDE RUSH</div>
+      <div id="bootmsg">Loading photoreal ocean engine...</div>
+    </div>
+  </div>
+
+  <div id="rotate">
+    <div class="rotbox">
+      <h2>ROTATE YOUR DEVICE</h2>
+      <p>Riptide Rush plays best in landscape mode. Turn your phone sideways to race the swells.</p>
+    </div>
+  </div>
+
+  <div id="errbox" hidden></div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
