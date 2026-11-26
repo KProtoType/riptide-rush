@@ -1,35 +1,64 @@
-// 3D Ocean Effects for Riptide Rush:
-//  - Gerstner-conforming foaming Wake Ribbons behind EVERY racer (player + 7 rivals)
-//  - Rooster-Tail Hydro Jet Plume (turns electric cyan-white during Hydro Nitro!)
-//  - High-performance pooled 3D Spray, Carve Sheet, Jump Splash & Wake-Bump Particles
+// Photoreal 3D Ocean Spray & Foam FX for Riptide Rush:
+//  - Frothy noise-textured V-Wake Foam Ribbons synced accurately with 2-iteration Gerstner wave height
+//  - Crisp multi-droplet sparkling sea-spray sprite (no blurry cotton balls!)
+//  - Dynamic bow-chop spray + dramatic outer-chine carving spray sheets
+//  - Compact, glistening Rooster-Tail hydro jet (turns blazing cyan-white on Hydro Nitro)
+//  - Huge water-crown splashdowns & wake-spray bumping explosions
 
 import * as THREE from 'three';
-import { sampleOceanHeight } from './waves.js';
+import { sampleOcean } from './waves.js';
+import { getNoiseTex } from './scene.js';
 import { PERF } from './perf.js';
 
-function createSoftParticleTexture() {
+// Crisp organic sea-spray droplet cluster texture (replaces flat fuzzy circle!)
+function createSprayDropletTexture() {
   const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 64;
+  c.width = 96;
+  c.height = 96;
   const g = c.getContext('2d');
-  const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30);
-  grad.addColorStop(0.0, 'rgba(255,255,255,1.0)');
-  grad.addColorStop(0.42, 'rgba(235,250,255,0.75)');
-  grad.addColorStop(0.78, 'rgba(180,235,255,0.22)');
-  grad.addColorStop(1.0, 'rgba(180,235,255,0.0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
+  g.clearRect(0, 0, 96, 96);
+
+  // Subtle airy mist core
+  const mist = g.createRadialGradient(48, 48, 2, 48, 48, 42);
+  mist.addColorStop(0.0, 'rgba(255,255,255,0.68)');
+  mist.addColorStop(0.42, 'rgba(225,248,255,0.34)');
+  mist.addColorStop(0.82, 'rgba(180,235,255,0.08)');
+  mist.addColorStop(1.0, 'rgba(180,235,255,0.0)');
+  g.fillStyle = mist;
+  g.fillRect(0, 0, 96, 96);
+
+  // Crisp glistening water droplets scattered inside the spray puff
+  const drops = [
+    [48, 46, 9], [36, 40, 6], [60, 42, 6.5], [44, 58, 5.5], [56, 56, 5],
+    [30, 52, 4], [66, 52, 4], [48, 30, 4.5], [38, 66, 3.5], [58, 30, 3.8],
+    [26, 36, 2.8], [70, 38, 3.0], [50, 70, 3.0], [34, 28, 2.6], [64, 65, 2.8],
+  ];
+  for (const [x, y, r] of drops) {
+    const dg = g.createRadialGradient(x - r * 0.2, y - r * 0.2, 0.5, x, y, r);
+    dg.addColorStop(0.0, 'rgba(255,255,255,1.0)');
+    dg.addColorStop(0.6, 'rgba(235,252,255,0.85)');
+    dg.addColorStop(1.0, 'rgba(200,242,255,0.0)');
+    g.fillStyle = dg;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
-// Single racer's continuous V-wake foam ribbon on the ocean surface
+const _wTmp = { y: 0, nx: 0, ny: 1, nz: 0, vy: 0, crest: 0 };
+
+// Organic frothy foam wake ribbon conforming cleanly to exact Gerstner waves!
 class WakeRibbon {
-  constructor(scene, maxPoints = 34) {
+  constructor(scene, maxPoints = 46, isPlayer = false) {
     this.maxPoints = maxPoints;
+    this.isPlayer = isPlayer;
     this.points = [];
     this.emitAccum = 0;
+    this.uvScroll = 0;
 
     const vertCount = maxPoints * 2;
     this.positions = new Float32Array(vertCount * 3);
@@ -56,7 +85,9 @@ class WakeRibbon {
       depthWrite: false,
       side: THREE.DoubleSide,
       uniforms: {
-        uColor: { value: new THREE.Color('#eef9ff') },
+        uColor: { value: new THREE.Color('#f4fbff') },
+        tNoise: { value: getNoiseTex() },
+        uTime: { value: 0 },
       },
       vertexShader: `
         attribute float aAlpha;
@@ -69,16 +100,25 @@ class WakeRibbon {
         }`,
       fragmentShader: `
         uniform vec3 uColor;
+        uniform sampler2D tNoise;
+        uniform float uTime;
         varying float vAlpha;
         varying vec2 vUv;
         void main() {
-          // Dual V-wake edge foam bands + airy lacy center
+          // Frothy lacy foam using multi-scale noise (never looks like a flat white plastic stripe!)
           float edge = abs(vUv.x - 0.5) * 2.0;
-          float twin = smoothstep(0.15, 0.72, edge) * (1.0 - smoothstep(0.78, 1.0, edge));
-          float center = (1.0 - edge) * 0.45;
-          float foam = (twin * 0.95 + center) * vAlpha;
-          if (foam < 0.01) discard;
-          gl_FragColor = vec4(uColor, clamp(foam * 0.78, 0.0, 0.85));
+          float n1 = texture2D(tNoise, vec2(vUv.x * 2.2, vUv.y * 5.5 - uTime * 0.25)).r;
+          float n2 = texture2D(tNoise, vec2(vUv.x * 5.2 + 0.3, vUv.y * 12.0 + uTime * 0.18)).g;
+          float froth = smoothstep(0.22, 0.78, n1 * 0.62 + n2 * 0.52);
+
+          // Twin V-wake crest arms + frothy turbulent prop-wash center
+          float twin = smoothstep(0.18, 0.68, edge) * (1.0 - smoothstep(0.76, 1.0, edge));
+          float center = (1.0 - smoothstep(0.0, 0.58, edge)) * 0.58;
+          float shape = (twin * 1.05 + center) * froth;
+          // Dissolve smoothly at outer edges & tail
+          float alpha = shape * vAlpha * (1.0 - smoothstep(0.84, 1.0, edge));
+          if (alpha < 0.015) discard;
+          gl_FragColor = vec4(uColor, clamp(alpha * 0.88, 0.0, 0.88));
         }`,
     });
 
@@ -87,6 +127,7 @@ class WakeRibbon {
     this.mesh.renderOrder = 2;
     scene.add(this.mesh);
     this.geo = geo;
+    this.mat = mat;
   }
 
   reset() {
@@ -96,30 +137,32 @@ class WakeRibbon {
   }
 
   update(dt, time, racer) {
-    // Age existing ribbon points
+    this.mat.uniforms.uTime.value = time;
+    const maxAge = this.isPlayer ? 2.1 : 1.5;
+
     for (let i = this.points.length - 1; i >= 0; i--) {
       this.points[i].age += dt;
-      if (this.points[i].age > 1.7) {
+      if (this.points[i].age > maxAge) {
         this.points.splice(i, 1);
       }
     }
 
-    // Emit fresh wake sample when in water and moving
     this.emitAccum += dt;
     const speed = racer.speed;
-    if (!racer.airborne && speed > 4.0 && this.emitAccum >= 0.045) {
+    const emitInterval = this.isPlayer ? 0.024 : 0.042;
+    if (!racer.airborne && speed > 3.5 && this.emitAccum >= emitInterval) {
       this.emitAccum = 0;
       const fwdX = Math.sin(racer.heading);
       const fwdZ = Math.cos(racer.heading);
-      const rightX = Math.cos(racer.heading);
-      const rightZ = -Math.sin(racer.heading);
+      const rightX = -fwdZ;
+      const rightZ = fwdX;
       this.points.unshift({
-        x: racer.x - fwdX * 1.5,
-        z: racer.z - fwdZ * 1.5,
+        x: racer.x - fwdX * 1.45,
+        z: racer.z - fwdZ * 1.45,
         rx: rightX,
         rz: rightZ,
         age: 0,
-        intensity: Math.min(1.0, speed / 34.0) * (racer.nitroActive ? 1.35 : 1.0),
+        intensity: Math.min(1.1, speed / 30.0) * (racer.nitroActive ? 1.35 : 1.0),
       });
       if (this.points.length > this.maxPoints) this.points.pop();
     }
@@ -133,15 +176,16 @@ class WakeRibbon {
         this.alphas[vi + 1] = 0;
         continue;
       }
-      const life = Math.max(0, 1.0 - p.age / 1.7);
-      const spread = 0.72 + p.age * 3.8; // V-wake widens smoothly behind ski
+      const life = Math.max(0, 1.0 - p.age / maxAge);
+      const spread = 0.78 + p.age * 4.2;
       const lx = p.x - p.rx * spread;
       const lz = p.z - p.rz * spread;
       const rx = p.x + p.rx * spread;
       const rz = p.z + p.rz * spread;
 
-      const ly = sampleOceanHeight(lx, lz, time) + 0.12;
-      const ry = sampleOceanHeight(rx, rz, time) + 0.12;
+      // Accurate 2-iteration Gerstner surface match so wake NEVER clips underwater!
+      const ly = sampleOcean(lx, lz, _wTmp, time).y + 0.16;
+      const ry = sampleOcean(rx, rz, _wTmp, time).y + 0.16;
 
       this.positions[vi * 3] = lx;
       this.positions[vi * 3 + 1] = ly;
@@ -151,7 +195,8 @@ class WakeRibbon {
       this.positions[(vi + 1) * 3 + 1] = ry;
       this.positions[(vi + 1) * 3 + 2] = rz;
 
-      const fade = life * life * p.intensity * (i === 0 ? 0.65 : 1.0);
+      const headFade = i === 0 ? 0.35 : i === 1 ? 0.75 : 1.0;
+      const fade = life * life * p.intensity * headFade;
       this.alphas[vi] = fade;
       this.alphas[vi + 1] = fade;
 
@@ -170,12 +215,12 @@ class WakeRibbon {
   dispose(scene) {
     scene.remove(this.mesh);
     this.geo.dispose();
-    this.mesh.material.dispose();
+    this.mat.dispose();
   }
 }
 
 export function createOceanFX(scene, racerCount = 8) {
-  const MAX_PARTICLES = Math.round(950 * (PERF.particles || 0.85));
+  const MAX_PARTICLES = Math.round(1350 * (PERF.particles || 0.85));
   const posArr = new Float32Array(MAX_PARTICLES * 3);
   const colArr = new Float32Array(MAX_PARTICLES * 3);
   const sizeArr = new Float32Array(MAX_PARTICLES);
@@ -209,7 +254,7 @@ export function createOceanFX(scene, racerCount = 8) {
     transparent: true,
     depthWrite: false,
     uniforms: {
-      tSprite: { value: createSoftParticleTexture() },
+      tSprite: { value: createSprayDropletTexture() },
     },
     vertexShader: `
       attribute float aSize;
@@ -221,7 +266,8 @@ export function createOceanFX(scene, racerCount = 8) {
         vColor = color;
         vAlpha = aAlpha;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = clamp(aSize * (320.0 / max(1.0, -mv.z)), 2.0, 110.0);
+        // Keep close-to-camera spray crisp rather than huge blurry blobs
+        gl_PointSize = clamp(aSize * (270.0 / max(2.2, -mv.z)), 2.5, 68.0);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
@@ -231,7 +277,7 @@ export function createOceanFX(scene, racerCount = 8) {
       void main() {
         vec4 t = texture2D(tSprite, gl_PointCoord);
         float a = t.a * vAlpha;
-        if (a < 0.01) discard;
+        if (a < 0.015) discard;
         gl_FragColor = vec4(vColor * t.rgb, a);
       }`,
   });
@@ -241,9 +287,9 @@ export function createOceanFX(scene, racerCount = 8) {
   pointsMesh.renderOrder = 4;
   scene.add(pointsMesh);
 
-  // Create wake ribbons for player + 7 rivals
+  // Create noise-textured frothy wake ribbons for all racers
   const ribbons = Array.from({ length: racerCount }, (_, i) =>
-    new WakeRibbon(scene, i === 0 ? 38 : 24)
+    new WakeRibbon(scene, i === 0 ? 48 : 26, i === 0)
   );
 
   function spawnParticle({
@@ -253,13 +299,13 @@ export function createOceanFX(scene, racerCount = 8) {
     vx,
     vy,
     vz,
-    maxAge = 0.6,
-    size0 = 1.0,
-    size1 = 3.2,
-    r = 0.92,
-    g = 0.98,
+    maxAge = 0.55,
+    size0 = 0.8,
+    size1 = 2.4,
+    r = 0.94,
+    g = 0.99,
     b = 1.0,
-    gravity = 16.0,
+    gravity = 19.0,
   }) {
     const p = particles[cursor];
     cursor = (cursor + 1) % MAX_PARTICLES;
@@ -285,55 +331,52 @@ export function createOceanFX(scene, racerCount = 8) {
       for (const p of particles) p.age = 99;
     },
 
-    // Huge dramatic water crown splash on jump landings or stunt bails
     spawnSplash(x, y, z, intensity = 1.0) {
-      const count = Math.round(28 * intensity * (PERF.particles || 0.85));
+      const count = Math.round(38 * intensity * (PERF.particles || 0.85));
       for (let i = 0; i < count; i++) {
         const ang = Math.random() * Math.PI * 2;
-        const spd = (3.5 + Math.random() * 11.5) * intensity;
+        const spd = (4.0 + Math.random() * 12.5) * intensity;
         spawnParticle({
-          x: x + Math.cos(ang) * 0.7,
+          x: x + Math.cos(ang) * 0.8,
           y: y + 0.25,
-          z: z + Math.sin(ang) * 0.7,
+          z: z + Math.sin(ang) * 0.8,
           vx: Math.cos(ang) * spd,
-          vy: (6.5 + Math.random() * 10.5) * intensity,
+          vy: (7.5 + Math.random() * 11.5) * intensity,
           vz: Math.sin(ang) * spd,
-          maxAge: 0.45 + Math.random() * 0.45,
-          size0: 1.4,
-          size1: 4.8 * intensity,
-          r: 0.92,
-          g: 0.98,
+          maxAge: 0.45 + Math.random() * 0.42,
+          size0: 1.0,
+          size1: 3.4 * intensity,
+          r: 0.94,
+          g: 0.99,
           b: 1.0,
-          gravity: 20.0,
+          gravity: 23.0,
         });
       }
     },
 
-    // Wake-spray bumping collision burst between two skis
     spawnBumpSpray(x, y, z) {
-      const count = Math.round(24 * (PERF.particles || 0.85));
+      const count = Math.round(32 * (PERF.particles || 0.85));
       for (let i = 0; i < count; i++) {
         const ang = Math.random() * Math.PI * 2;
-        const spd = 4 + Math.random() * 10;
+        const spd = 4.5 + Math.random() * 11.0;
         spawnParticle({
           x,
-          y: y + 0.4,
+          y: y + 0.35,
           z,
           vx: Math.cos(ang) * spd,
-          vy: 5 + Math.random() * 9,
+          vy: 5.5 + Math.random() * 9.5,
           vz: Math.sin(ang) * spd,
-          maxAge: 0.4 + Math.random() * 0.35,
-          size0: 1.2,
-          size1: 4.0,
-          r: 0.85,
-          g: 0.97,
+          maxAge: 0.38 + Math.random() * 0.32,
+          size0: 0.9,
+          size1: 2.9,
+          r: 0.90,
+          g: 0.98,
           b: 1.0,
-          gravity: 18,
+          gravity: 21,
         });
       }
     },
 
-    // Per-frame rooster-tail, carving spray sheets, Nitro plasma jet & wake ribbons
     update(dt, time, racers) {
       const pMul = PERF.particles || 0.85;
       for (let idx = 0; idx < racers.length; idx++) {
@@ -342,83 +385,110 @@ export function createOceanFX(scene, racerCount = 8) {
 
         const fwdX = Math.sin(r.heading);
         const fwdZ = Math.cos(r.heading);
-        const rightX = Math.cos(r.heading);
-        const rightZ = -Math.sin(r.heading);
+        // True world right vector (fwd × up = (-fwdZ, fwdX))
+        const rightX = -fwdZ;
+        const rightZ = fwdX;
 
-        // 1. Rooster-tail hydro jet behind impeller!
-        if (!r.airborne && r.speed > 7) {
-          const tailCount = idx === 0 ? (r.nitroActive ? 5 : 3) : Math.random() < 0.55 * pMul ? 1 : 0;
-          const tailX = r.x - fwdX * 1.95;
-          const tailZ = r.z - fwdZ * 1.95;
+        if (!r.airborne && r.speed > 6) {
+          // 1. Glistening Rooster-Tail Arc behind impeller!
+          const tailCount =
+            idx === 0 ? (r.nitroActive ? 5 : 3) : Math.random() < 0.6 * pMul ? 1 : 0;
+          const tailX = r.x - fwdX * 1.9;
+          const tailZ = r.z - fwdZ * 1.9;
           for (let k = 0; k < tailCount; k++) {
-            const jetSpd = 6 + r.speed * 0.28 + Math.random() * 4;
             const isNitro = r.nitroActive;
+            const jetSpd = 7 + r.speed * 0.22 + Math.random() * 4;
             spawnParticle({
-              x: tailX + (Math.random() - 0.5) * 0.35,
-              y: r.y + 0.25 + Math.random() * 0.25,
-              z: tailZ + (Math.random() - 0.5) * 0.35,
-              vx: -fwdX * jetSpd + (Math.random() - 0.5) * 2.4,
-              vy: 3.4 + r.speed * 0.095 + Math.random() * 2.5 + (isNitro ? 2.5 : 0),
-              vz: -fwdZ * jetSpd + (Math.random() - 0.5) * 2.4,
-              maxAge: isNitro ? 0.52 : 0.42,
-              size0: isNitro ? 1.5 : 1.05,
-              size1: isNitro ? 4.4 : 3.2,
-              r: isNitro ? 0.28 : 0.92,
-              g: isNitro ? 0.96 : 0.98,
+              x: tailX + (Math.random() - 0.5) * 0.28,
+              y: r.y + 0.24 + Math.random() * 0.16,
+              z: tailZ + (Math.random() - 0.5) * 0.28,
+              vx: -fwdX * jetSpd + rightX * (Math.random() - 0.5) * 2.0,
+              vy: 3.6 + r.speed * 0.08 + Math.random() * 2.2 + (isNitro ? 2.2 : 0),
+              vz: -fwdZ * jetSpd + rightZ * (Math.random() - 0.5) * 2.0,
+              maxAge: isNitro ? 0.44 : 0.36,
+              size0: isNitro ? 1.05 : 0.72,
+              size1: isNitro ? 2.8 : 2.1,
+              r: isNitro ? 0.35 : 0.94,
+              g: isNitro ? 0.97 : 0.99,
               b: 1.0,
-              gravity: isNitro ? 12.0 : 18.0,
+              gravity: isNitro ? 14.0 : 21.0,
             });
           }
+
+          // 2. Dynamic Twin Bow-Chop Spray throwing droplets out from hull bow!
+          if (idx === 0 && r.speed > 18) {
+            const bowX = r.x + fwdX * 1.25;
+            const bowZ = r.z + fwdZ * 1.25;
+            for (const side of [-1, 1]) {
+              if (Math.random() < 0.75 * pMul) {
+                const outSpd = 3.2 + r.speed * 0.10 + Math.random() * 2.5;
+                spawnParticle({
+                  x: bowX + rightX * side * 0.55,
+                  y: r.y + 0.12,
+                  z: bowZ + rightZ * side * 0.55,
+                  vx: rightX * side * outSpd + fwdX * (r.speed * 0.32),
+                  vy: 2.2 + r.speed * 0.055 + Math.random() * 1.8,
+                  vz: rightZ * side * outSpd + fwdZ * (r.speed * 0.32),
+                  maxAge: 0.30 + Math.random() * 0.18,
+                  size0: 0.62,
+                  size1: 1.95,
+                  r: 0.94,
+                  g: 0.99,
+                  b: 1.0,
+                  gravity: 22.0,
+                });
+              }
+            }
+          }
+
+          // 3. Dramatic Sunlit Outer-Chine Carving Spray Sheets!
+          const carve = Math.abs(r.steerSmooth || 0);
+          if (r.speed > 13 && carve > 0.20) {
+            // Turning right (steerSmooth > 0) pushes the LEFT (-right) chine hard into the water!
+            const outerSide = r.steerSmooth > 0 ? -1 : 1;
+            const count = idx === 0 ? 4 : Math.random() < 0.5 ? 1 : 0;
+            for (let k = 0; k < count; k++) {
+              const outSpd = 6.5 + carve * 11.5 + Math.random() * 3.5;
+              spawnParticle({
+                x: r.x + rightX * outerSide * 0.72 + fwdX * (Math.random() - 0.5) * 1.2,
+                y: r.y + 0.16,
+                z: r.z + rightZ * outerSide * 0.72 + fwdZ * (Math.random() - 0.5) * 1.2,
+                vx: rightX * outerSide * outSpd + fwdX * (r.speed * 0.25),
+                vy: 3.8 + carve * 5.8 + Math.random() * 2.4,
+                vz: rightZ * outerSide * outSpd + fwdZ * (r.speed * 0.25),
+                maxAge: 0.36 + Math.random() * 0.22,
+                size0: 0.85,
+                size1: 2.8,
+                r: 0.93,
+                g: 0.99,
+                b: 1.0,
+                gravity: 21.0,
+              });
+            }
+          }
         } else if (r.airborne && r.nitroActive && idx === 0) {
-          // Mid-air Nitro thruster jet trail!
-          const tailX = r.x - fwdX * 1.95;
-          const tailZ = r.z - fwdZ * 1.95;
+          const tailX = r.x - fwdX * 1.9;
+          const tailZ = r.z - fwdZ * 1.9;
           for (let k = 0; k < 3; k++) {
             spawnParticle({
               x: tailX,
-              y: r.y + 0.15,
+              y: r.y + 0.14,
               z: tailZ,
-              vx: -fwdX * 12 + (Math.random() - 0.5) * 1.8,
-              vy: (Math.random() - 0.5) * 1.5,
-              vz: -fwdZ * 12 + (Math.random() - 0.5) * 1.8,
-              maxAge: 0.26,
-              size0: 1.4,
-              size1: 3.4,
-              r: 0.22,
-              g: 0.95,
+              vx: -fwdX * 12 + (Math.random() - 0.5) * 1.5,
+              vy: (Math.random() - 0.5) * 1.2,
+              vz: -fwdZ * 12 + (Math.random() - 0.5) * 1.5,
+              maxAge: 0.24,
+              size0: 1.0,
+              size1: 2.5,
+              r: 0.28,
+              g: 0.96,
               b: 1.0,
               gravity: 3.0,
             });
           }
         }
-
-        // 2. Side carving spray sheets when leaning hard into a turn!
-        const carve = Math.abs(r.steerSmooth || 0);
-        if (!r.airborne && r.speed > 14 && carve > 0.28) {
-          const side = r.steerSmooth > 0 ? -1 : 1; // outer carving edge sprays water out!
-          const count = idx === 0 ? 2 : Math.random() < 0.45 ? 1 : 0;
-          for (let k = 0; k < count; k++) {
-            const outSpd = 5 + carve * 9 + Math.random() * 3;
-            spawnParticle({
-              x: r.x + rightX * side * 0.75,
-              y: r.y + 0.18,
-              z: r.z + rightZ * side * 0.75,
-              vx: rightX * side * outSpd - fwdX * 2.5,
-              vy: 3.2 + carve * 4.5 + Math.random() * 2.0,
-              vz: rightZ * side * outSpd - fwdZ * 2.5,
-              maxAge: 0.36 + Math.random() * 0.22,
-              size0: 0.95,
-              size1: 3.0,
-              r: 0.88,
-              g: 0.98,
-              b: 1.0,
-              gravity: 19.0,
-            });
-          }
-        }
       }
 
-      // Advance all particles
       for (let i = 0; i < MAX_PARTICLES; i++) {
         const p = particles[i];
         if (p.age < p.maxAge) {
@@ -427,8 +497,8 @@ export function createOceanFX(scene, racerCount = 8) {
           p.x += p.vx * dt;
           p.y += p.vy * dt;
           p.z += p.vz * dt;
-          p.vx *= 1 - dt * 1.2;
-          p.vz *= 1 - dt * 1.2;
+          p.vx *= 1 - dt * 1.3;
+          p.vz *= 1 - dt * 1.3;
 
           const t = Math.min(1, p.age / p.maxAge);
           posArr[i * 3] = p.x;
@@ -438,7 +508,7 @@ export function createOceanFX(scene, racerCount = 8) {
           colArr[i * 3 + 1] = p.g;
           colArr[i * 3 + 2] = p.b;
           sizeArr[i] = p.size0 + (p.size1 - p.size0) * t;
-          alphaArr[i] = Math.sin(t * Math.PI) * (1 - t * 0.35) * 0.78;
+          alphaArr[i] = Math.sin(t * Math.PI) * (1 - t * 0.25) * 0.88;
         } else {
           posArr[i * 3 + 1] = -999;
           alphaArr[i] = 0;

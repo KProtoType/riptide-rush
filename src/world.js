@@ -523,12 +523,87 @@ function createLighthouse() {
   return { group: g, beamPivot };
 }
 
-// Build Course Elements: Start/Finish Arch, Red/Yellow Slalom Buoys, Floating Jump Ramps
+// Create bold high-contrast Turn Chevron Board texture (>>> or <<<)
+function createTurnSignTexture(dirRight) {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 192;
+  const g = c.getContext('2d');
+  g.fillStyle = '#071b30';
+  g.fillRect(0, 0, 512, 192);
+  g.strokeStyle = '#ffd046';
+  g.lineWidth = 10;
+  g.strokeRect(8, 8, 496, 176);
+
+  // Draw 3 bold glowing gold chevrons
+  g.fillStyle = '#ffd046';
+  for (let i = 0; i < 3; i++) {
+    const cx = 110 + i * 145;
+    g.beginPath();
+    if (dirRight) {
+      g.moveTo(cx - 42, 34);
+      g.lineTo(cx + 8, 34);
+      g.lineTo(cx + 58, 96);
+      g.lineTo(cx + 8, 158);
+      g.lineTo(cx - 42, 158);
+      g.lineTo(cx + 8, 96);
+    } else {
+      g.moveTo(cx + 42, 34);
+      g.lineTo(cx - 8, 34);
+      g.lineTo(cx - 58, 96);
+      g.lineTo(cx - 8, 158);
+      g.lineTo(cx + 42, 158);
+      g.lineTo(cx - 8, 96);
+    }
+    g.closePath();
+    g.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Create luminous Checkpoint Gate banner texture
+function createGateTexture(num) {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 512, 0);
+  grad.addColorStop(0, '#072a45');
+  grad.addColorStop(0.5, '#0c6b8a');
+  grad.addColorStop(1, '#072a45');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 512, 128);
+  g.fillStyle = '#22eef6';
+  g.fillRect(0, 0, 512, 12);
+  g.fillRect(0, 116, 512, 12);
+  g.fillStyle = '#ffffff';
+  g.font = '900 52px Impact, Arial Black, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(`»  CHECKPOINT ${num}  »`, 256, 66);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Build Course Elements: Start/Finish Arch, Checkpoint Gate Arches, Floating Buoy Lane Ropes,
+// Bend Turn-Arrow Pontoon Signs, Red/Yellow Slalom Buoys, and Floating Jump Ramps
 function buildCourseObjects(course, worldGroup) {
   const animated = {
     buoys: [],
     ramps: [],
+    laneRopes: [],
+    laneFloats: [],
+    turnSigns: [],
+    gateArches: [],
   };
+
+  const pontoonMat = new THREE.MeshStandardMaterial({ color: '#223244', roughness: 0.55, metalness: 0.35 });
+  const pillarMat = new THREE.MeshStandardMaterial({ color: '#e6edf5', roughness: 0.25, metalness: 0.5 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: '#00d8f5', emissive: '#00b4d8', emissiveIntensity: 0.9 });
+  const goldGlowMat = new THREE.MeshStandardMaterial({ color: '#ffd046', emissive: '#ffaa00', emissiveIntensity: 0.85 });
 
   // ---- 1. Start / Finish Floating Marina Gantry Arch
   const start = sampleCourse(course, 0);
@@ -537,24 +612,20 @@ function buildCourseObjects(course, worldGroup) {
   arch.rotation.y = start.heading;
   worldGroup.add(arch);
 
-  const archSpan = course.width * 0.88;
-  const pontoonMat = new THREE.MeshStandardMaterial({ color: '#223244', roughness: 0.55, metalness: 0.35 });
-  const pillarMat = new THREE.MeshStandardMaterial({ color: '#e6edf5', roughness: 0.25, metalness: 0.5 });
-  const accentMat = new THREE.MeshStandardMaterial({ color: '#00d8f5', emissive: '#00a8c8', emissiveIntensity: 0.8 });
-
+  const archSpan = course.width * 0.94;
   for (const s of [-1, 1]) {
     const px = s * (archSpan * 0.5);
     const floatBase = new THREE.Mesh(new THREE.BoxGeometry(4.2, 2.2, 9.0), pontoonMat);
     floatBase.position.set(px, 0.2, 0);
     arch.add(floatBase);
 
-    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.85, 16.5, 10), pillarMat);
-    pillar.position.set(px, 8.5, 0);
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.85, 17.5, 10), pillarMat);
+    pillar.position.set(px, 9.0, 0);
     pillar.castShadow = true;
     arch.add(pillar);
 
-    const lightBar = new THREE.Mesh(new THREE.BoxGeometry(0.45, 13, 0.45), accentMat);
-    lightBar.position.set(px - s * 0.72, 8.5, 0);
+    const lightBar = new THREE.Mesh(new THREE.BoxGeometry(0.48, 14.0, 0.48), accentMat);
+    lightBar.position.set(px - s * 0.72, 9.0, 0);
     arch.add(lightBar);
   }
 
@@ -563,30 +634,191 @@ function buildCourseObjects(course, worldGroup) {
     new THREE.BoxGeometry(archSpan + 1.5, 3.6, 1.1),
     new THREE.MeshStandardMaterial({ map: bannerTex, roughness: 0.4, metalness: 0.1 })
   );
-  banner.position.set(0, 15.6, 0);
+  banner.position.set(0, 16.4, 0);
   arch.add(banner);
 
-  // ---- 2. Red / Yellow Slalom Buoys with Floating Directional Chevrons!
+  // ---- 2. Big Luminous Checkpoint Gate Arches Ahead (5 evenly spaced around every venue!)
+  const gateFracs = [0.17, 0.34, 0.50, 0.67, 0.84];
+  const gateSpan = course.width * 0.96;
+  gateFracs.forEach((frac, idx) => {
+    const sp = sampleCourse(course, frac * course.totalLen);
+    const gg = new THREE.Group();
+    gg.position.set(sp.x, 0, sp.z);
+    gg.rotation.y = sp.heading;
+
+    for (const s of [-1, 1]) {
+      const px = s * (gateSpan * 0.5);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.8, 6.8), pontoonMat);
+      base.position.set(px, 0.1, 0);
+      gg.add(base);
+
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.75, 14.8, 10), pillarMat);
+      post.position.set(px, 7.6, 0);
+      gg.add(post);
+
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.45, 12.2, 0.45), idx % 2 === 0 ? accentMat : goldGlowMat);
+      strip.position.set(px - s * 0.65, 7.6, 0);
+      gg.add(strip);
+    }
+
+    const gTex = createGateTexture(idx + 1);
+    const gBanner = new THREE.Mesh(
+      new THREE.BoxGeometry(gateSpan + 1.0, 2.7, 0.9),
+      new THREE.MeshStandardMaterial({
+        map: gTex,
+        emissive: '#0c5c75',
+        emissiveIntensity: 0.45,
+        roughness: 0.35,
+      })
+    );
+    gBanner.position.set(0, 14.2, 0);
+    gg.add(gBanner);
+
+    worldGroup.add(gg);
+    animated.gateArches.push({ mesh: gg, x: sp.x, z: sp.z });
+  });
+
+  // ---- 3. Continuous Floating Buoy Lane Ropes on BOTH Sides of the Course!
+  // Makes the racing channel 100% unmistakable on open ocean swells!
+  const laneSteps = 96;
+  const laneHalfW = course.width * 0.56;
+  const orangeFloatMat = new THREE.MeshStandardMaterial({
+    color: '#ff5e1a',
+    emissive: '#591a00',
+    emissiveIntensity: 0.45,
+    roughness: 0.35,
+  });
+  const whiteFloatMat = new THREE.MeshStandardMaterial({
+    color: '#f4fbff',
+    emissive: '#1e4254',
+    emissiveIntensity: 0.25,
+    roughness: 0.35,
+  });
+  const floatGeo = new THREE.CylinderGeometry(0.55, 0.68, 1.55, 8);
+
+  for (const side of [-1, 1]) {
+    const pts = [];
+    for (let i = 0; i <= laneSteps; i++) {
+      const s = ((i % laneSteps) / laneSteps) * course.totalLen;
+      const sp = sampleCourse(course, s);
+      const lx = sp.x + sp.rx * (side * laneHalfW);
+      const lz = sp.z + sp.rz * (side * laneHalfW);
+      pts.push({ x: lx, z: lz });
+
+      if (i < laneSteps) {
+        const buoy = new THREE.Mesh(floatGeo, i % 2 === 0 ? orangeFloatMat : whiteFloatMat);
+        buoy.position.set(lx, 0.35, lz);
+        worldGroup.add(buoy);
+        animated.laneFloats.push({ mesh: buoy, x: lx, z: lz });
+      }
+    }
+
+    // Continuous floating rope ribbon connecting every lane buoy along this edge!
+    const ropePos = new Float32Array((laneSteps + 1) * 2 * 3);
+    const ropeIdx = [];
+    for (let i = 0; i < laneSteps; i++) {
+      const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+      ropeIdx.push(a, c, b, b, c, d);
+    }
+    const ropeGeo = new THREE.BufferGeometry();
+    ropeGeo.setAttribute('position', new THREE.BufferAttribute(ropePos, 3));
+    ropeGeo.setIndex(ropeIdx);
+    const ropeMat = new THREE.MeshBasicMaterial({
+      color: side > 0 ? '#ff8b3d' : '#5ce8ff',
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+    });
+    const ropeMesh = new THREE.Mesh(ropeGeo, ropeMat);
+    ropeMesh.frustumCulled = false;
+    worldGroup.add(ropeMesh);
+    animated.laneRopes.push({ pts, pos: ropePos, geo: ropeGeo });
+  }
+
+  // ---- 4. Bold Turn-Arrow Pontoon Signs on the Outside of Sharp Bends!
+  const signRightMat = new THREE.MeshStandardMaterial({
+    map: createTurnSignTexture(true),
+    emissive: '#3d2c00',
+    emissiveIntensity: 0.45,
+    roughness: 0.35,
+  });
+  const signLeftMat = new THREE.MeshStandardMaterial({
+    map: createTurnSignTexture(false),
+    emissive: '#3d2c00',
+    emissiveIntensity: 0.45,
+    roughness: 0.35,
+  });
+  const signCheckN = 48;
+  let lastSignS = -999;
+  for (let i = 0; i < signCheckN; i++) {
+    const s = (i / signCheckN) * course.totalLen;
+    if (s - lastSignS < 85) continue;
+    const spPrev = sampleCourse(course, s - 38);
+    const spCur = sampleCourse(course, s);
+    const spNext = sampleCourse(course, s + 46);
+    // Cross product of tangent vectors gives turn direction!
+    // crossY = prev.tx * next.tz - prev.tz * next.tx
+    // Wait: if heading decreases (turns RIGHT), crossY > 0! Let's verify with dot(nextT, curRight):
+    const turnRightAmt = spNext.tx * spCur.rx + spNext.tz * spCur.rz;
+    const turnRightPrev = spCur.tx * spPrev.rx + spCur.tz * spPrev.rz;
+    const totalTurn = turnRightAmt + turnRightPrev * 0.5;
+
+    if (Math.abs(totalTurn) > 0.28) {
+      const isRightTurn = totalTurn > 0;
+      // Place sign on the OUTSIDE of the bend (LEFT side for a RIGHT turn, RIGHT side for a LEFT turn!)
+      const outSide = isRightTurn ? -1 : 1;
+      const sx = spCur.x + spCur.rx * (outSide * (laneHalfW + 5.0));
+      const sz = spCur.z + spCur.rz * (outSide * (laneHalfW + 5.0));
+
+      const sg = new THREE.Group();
+      sg.position.set(sx, 0, sz);
+      // Face oncoming racers (pointing back along -tangent, slightly angled inward toward the track!)
+      sg.rotation.y = spCur.heading + Math.PI + outSide * 0.32;
+
+      const base = new THREE.Mesh(new THREE.BoxGeometry(9.6, 1.4, 3.6), pontoonMat);
+      base.position.y = 0.2;
+      sg.add(base);
+
+      const board = new THREE.Mesh(
+        new THREE.BoxGeometry(10.5, 4.0, 0.6),
+        isRightTurn ? signRightMat : signLeftMat
+      );
+      board.position.y = 4.2;
+      sg.add(board);
+
+      for (const p of [-3.8, 3.8]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 3.2, 6), pillarMat);
+        leg.position.set(p, 1.8, 0);
+        sg.add(leg);
+      }
+
+      worldGroup.add(sg);
+      animated.turnSigns.push({ mesh: sg, x: sx, z: sz });
+      lastSignS = s;
+    }
+  }
+
+  // ---- 5. Red / Yellow Slalom Buoys with Floating Directional Chevrons & Target Pass Beacon!
   // RED = Pass on RIGHT (▶), YELLOW = Pass on LEFT (◀)
   const redMat = new THREE.MeshPhysicalMaterial({
     color: '#ff2b2b',
     emissive: '#7a0a0a',
-    emissiveIntensity: 0.45,
+    emissiveIntensity: 0.48,
     roughness: 0.2,
     clearcoat: 0.8,
   });
   const yellowMat = new THREE.MeshPhysicalMaterial({
     color: '#ffd000',
     emissive: '#7a5c00',
-    emissiveIntensity: 0.45,
+    emissiveIntensity: 0.48,
     roughness: 0.2,
     clearcoat: 0.8,
   });
   const whiteBand = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.3 });
   const darkBase = new THREE.MeshStandardMaterial({ color: '#1b242d', roughness: 0.7 });
 
-  const chevronGeo = new THREE.ConeGeometry(0.95, 1.85, 4);
-  chevronGeo.rotateZ(-Math.PI * 0.5); // points +X (right in buoy local space if rotated correctly)
+  const chevronGeo = new THREE.ConeGeometry(1.05, 2.0, 4);
+  chevronGeo.rotateZ(-Math.PI * 0.5);
 
   for (const b of course.buoys) {
     const isRed = b.side === 'right';
@@ -595,57 +827,63 @@ function buildCourseObjects(course, worldGroup) {
     bg.rotation.y = b.heading;
 
     const bMat = isRed ? redMat : yellowMat;
-    // Wide floating buoy collar
-    const collar = new THREE.Mesh(new THREE.CylinderGeometry(1.55, 1.75, 1.0, 14), bMat);
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(1.65, 1.85, 1.0, 14), bMat);
     collar.position.y = 0.2;
     bg.add(collar);
 
-    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(1.75, 1.2, 1.2, 14), darkBase);
+    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(1.85, 1.25, 1.2, 14), darkBase);
     skirt.position.y = -0.6;
     bg.add(skirt);
 
-    // Tall high-visibility racing cone spar
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.25, 4.4, 14), bMat);
-    cone.position.y = 2.7;
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.3, 4.8, 14), bMat);
+    cone.position.y = 2.9;
     cone.castShadow = true;
     bg.add(cone);
 
-    const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.96, 0.85, 14), whiteBand);
-    stripe.position.y = 2.4;
+    const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 1.0, 0.9, 14), whiteBand);
+    stripe.position.y = 2.55;
     bg.add(stripe);
 
-    // Glowing floating directional arrow chevron showing WHICH SIDE to pass!
-    // In local space (+Z is course forward, +X is course LEFT because heading=atan2(tx,tz) puts local +X = (tz, -tx) = -right!)
-    // Let's verify: local +Z = (sin h, cos h) = (tx, tz).
-    // Local +X = (cos h, -sin h) = (tz, -tx) = -( -tz, tx ) = -right!
-    // So course RIGHT is local -X, and course LEFT is local +X!
+    // Course RIGHT is local -X, course LEFT is local +X
     const arrowMat = new THREE.MeshBasicMaterial({
-      color: isRed ? '#ff4444' : '#ffe033',
+      color: isRed ? '#ff4d4d' : '#ffe438',
       transparent: true,
-      opacity: 0.92,
+      opacity: 0.95,
     });
     const arrow = new THREE.Mesh(chevronGeo, arrowMat);
-    arrow.position.set(isRed ? -2.2 : 2.2, 4.2, 0);
-    arrow.rotation.y = isRed ? Math.PI : 0; // points along local -X (course RIGHT) for RED, local +X (course LEFT) for YELLOW!
+    arrow.position.set(isRed ? -2.4 : 2.4, 4.5, 0);
+    arrow.rotation.y = isRed ? Math.PI : 0;
     bg.add(arrow);
 
-    // Subtle target halo ring (illuminates brighter when this buoy is the player's next slalom target)
+    // Glowing floating pass-side target ribbon extending onto the CORRECT pass side!
     const ringMat = new THREE.MeshBasicMaterial({
       color: isRed ? '#ff5555' : '#ffee55',
       transparent: true,
       opacity: 0.25,
       side: THREE.DoubleSide,
     });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(2.1, 2.65, 24), ringMat);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.8, 24), ringMat);
     ring.rotation.x = -Math.PI * 0.5;
     ring.position.y = 0.45;
     bg.add(ring);
 
+    const zoneMat = new THREE.MeshBasicMaterial({
+      color: '#46ffb8',
+      transparent: true,
+      opacity: 0.0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const passZone = new THREE.Mesh(new THREE.PlaneGeometry(11.0, 2.2), zoneMat);
+    passZone.rotation.x = -Math.PI * 0.5;
+    passZone.position.set(isRed ? -7.2 : 7.2, 0.48, 0);
+    bg.add(passZone);
+
     worldGroup.add(bg);
-    animated.buoys.push({ data: b, mesh: bg, arrow, ring, ringMat });
+    animated.buoys.push({ data: b, mesh: bg, arrow, ring, ringMat, zoneMat });
   }
 
-  // ---- 3. Floating Checkered Jump Ramps!
+  // ---- 6. Floating Checkered Jump Ramps!
   const checkerTex = createCheckerTexture('#ff9500', '#161b22', 6);
   const rampTopMat = new THREE.MeshStandardMaterial({ map: checkerTex, roughness: 0.45, metalness: 0.15 });
   const rampSideMat = new THREE.MeshStandardMaterial({ color: '#ff5500', roughness: 0.35, metalness: 0.25 });
@@ -660,7 +898,6 @@ function buildCourseObjects(course, worldGroup) {
     const W = r.width;
     const H = r.height;
 
-    // Wedge ramp geometry (slopes smoothly up from z = -L/2 at y = -0.35 to z = +L/2 at y = H)
     const shape = new THREE.Shape();
     shape.moveTo(-L * 0.5, -0.45);
     shape.lineTo(L * 0.5, -0.45);
@@ -669,15 +906,13 @@ function buildCourseObjects(course, worldGroup) {
     shape.closePath();
 
     const extrude = new THREE.ExtrudeGeometry(shape, { depth: W, bevelEnabled: false });
-    // Shape X is along ramp Z, Shape Y is Y, Extrude Z is along ramp X
     extrude.translate(0, 0, -W * 0.5);
-    extrude.rotateY(-Math.PI * 0.5); // maps Shape +X -> local +Z!
+    extrude.rotateY(-Math.PI * 0.5);
     const wedge = new THREE.Mesh(extrude, rampSideMat);
     wedge.castShadow = true;
     wedge.receiveShadow = true;
     rg.add(wedge);
 
-    // Checkered inclined riding deck surface
     const slopeLen = Math.hypot(L, H - 0.12);
     const slopeAng = Math.atan2(H - 0.12, L);
     const deck = new THREE.Mesh(new THREE.BoxGeometry(W * 0.94, 0.16, slopeLen), rampTopMat);
@@ -685,7 +920,6 @@ function buildCourseObjects(course, worldGroup) {
     deck.rotation.x = -slopeAng;
     rg.add(deck);
 
-    // Side buoyant pontoons + glowing launch edge beacons
     for (const s of [-1, 1]) {
       const floatTube = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, L + 1.2, 10), pontoonMat);
       floatTube.rotation.x = Math.PI * 0.5;
@@ -700,26 +934,6 @@ function buildCourseObjects(course, worldGroup) {
     worldGroup.add(rg);
     animated.ramps.push({ data: r, mesh: rg });
   }
-
-  // ---- 4. Subtle Course Corridor Perimeter Guide Floats
-  const guideMat = new THREE.MeshBasicMaterial({ color: '#9cf6ff', transparent: true, opacity: 0.72 });
-  const guideGeo = new THREE.SphereGeometry(0.62, 8, 6);
-  const guideCount = 34;
-  const guideFloats = [];
-  for (let i = 0; i < guideCount; i++) {
-    const s = (i / guideCount) * course.totalLen;
-    const sp = sampleCourse(course, s);
-    for (const side of [-1, 1]) {
-      const lat = side * (course.width * 0.68);
-      const gx = sp.x + sp.rx * lat;
-      const gz = sp.z + sp.rz * lat;
-      const m = new THREE.Mesh(guideGeo, guideMat);
-      m.position.set(gx, 0.2, gz);
-      worldGroup.add(m);
-      guideFloats.push({ mesh: m, x: gx, z: gz });
-    }
-  }
-  animated.guideFloats = guideFloats;
 
   return animated;
 }
@@ -1053,12 +1267,15 @@ export function buildVenueWorld(course, scene, sceneApi) {
         b.mesh.position.y = _wSample.y;
         b.mesh.rotation.z = -_wSample.nx * 0.55;
         b.mesh.rotation.x = _wSample.nz * 0.55;
-        // Bob arrow & pulse ring on the player's next upcoming buoy
+        // Bob arrow & pulse ring + green pass-zone ribbon on the player's next upcoming buoy
         const isNext = b.data.id === nextBuoyId;
-        b.arrow.position.y = 4.2 + Math.sin(time * 4.5 + b.data.id) * 0.32;
-        b.arrow.scale.setScalar(isNext ? 1.38 + Math.sin(time * 7) * 0.14 : 1.0);
-        b.ringMat.opacity = isNext ? 0.72 + Math.sin(time * 7) * 0.2 : 0.2;
-        b.ring.scale.setScalar(isNext ? 1.25 + Math.sin(time * 6) * 0.12 : 1.0);
+        b.arrow.position.y = 4.5 + Math.sin(time * 4.5 + b.data.id) * 0.34;
+        b.arrow.scale.setScalar(isNext ? 1.45 + Math.sin(time * 7) * 0.14 : 1.0);
+        b.ringMat.opacity = isNext ? 0.78 + Math.sin(time * 7) * 0.18 : 0.22;
+        b.ring.scale.setScalar(isNext ? 1.3 + Math.sin(time * 6) * 0.12 : 1.0);
+        if (b.zoneMat) {
+          b.zoneMat.opacity = isNext ? 0.34 + Math.sin(time * 6) * 0.12 : 0.0;
+        }
       }
       // Synchronized Gerstner wave bobbing for Floating Jump Ramps!
       for (const r of courseAnim.ramps) {
@@ -1067,9 +1284,31 @@ export function buildVenueWorld(course, scene, sceneApi) {
         r.mesh.rotation.z = -_wSample.nx * 0.22;
         r.mesh.rotation.x = _wSample.nz * 0.22;
       }
-      // Guide floats
-      for (const f of courseAnim.guideFloats) {
-        f.mesh.position.y = sampleOceanHeight(f.x, f.z, time) + 0.18;
+      // Floating lane floats & continuous connected lane ropes!
+      for (const f of courseAnim.laneFloats) {
+        f.mesh.position.y = sampleOceanHeight(f.x, f.z, time) + 0.32;
+      }
+      for (const rp of courseAnim.laneRopes) {
+        const pts = rp.pts;
+        const pos = rp.pos;
+        for (let i = 0; i < pts.length; i++) {
+          const wy = sampleOceanHeight(pts[i].x, pts[i].z, time) + 0.38;
+          const vi = i * 2;
+          pos[vi * 3] = pts[i].x;
+          pos[vi * 3 + 1] = wy + 0.22;
+          pos[vi * 3 + 2] = pts[i].z;
+          pos[(vi + 1) * 3] = pts[i].x;
+          pos[(vi + 1) * 3 + 1] = wy - 0.12;
+          pos[(vi + 1) * 3 + 2] = pts[i].z;
+        }
+        rp.geo.attributes.position.needsUpdate = true;
+      }
+      // Gentle bobbing for turn-arrow pontoon signs & checkpoint gate arches
+      for (const ts of courseAnim.turnSigns) {
+        ts.mesh.position.y = sampleOceanHeight(ts.x, ts.z, time) * 0.65;
+      }
+      for (const ga of courseAnim.gateArches) {
+        ga.mesh.position.y = sampleOceanHeight(ga.x, ga.z, time) * 0.45;
       }
     },
     dispose() {

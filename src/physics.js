@@ -2,7 +2,8 @@
 //  - Real synchronized 3D Gerstner buoyancy, carving, wave-crest launches & ramp launches
 //  - 4 Mid-Air Stunts (Superman, 360 Spin, Backflip, Grab) charging Hydro Nitro
 //  - Red (Right) / Yellow (Left) Buoy Slalom Combo Multiplier (x1..x5)
-//  - 7 AI Rival Jet-Ski Racers with competitive racing lines & wake-spray bumping
+//  - Rookie / Pro / Ace Difficulty with close pack AI & gentle course-alignment assist
+//  - Live navigation angle & Wrong-Way detection for overhead arcade direction arrow
 
 import { sampleOcean } from './waves.js';
 import {
@@ -13,12 +14,13 @@ import {
   wrapS,
 } from './venues.js';
 import { AI_RIVALS } from './skis.js';
+import { getDifficulty } from './perf.js';
 
 export const STUNT_DEFS = {
-  superman: { id: 'superman', label: 'SUPERMAN', duration: 0.72, nitro: 26, cash: 250 },
-  spin360:  { id: 'spin360',  label: '360 SPIN', duration: 0.64, nitro: 24, cash: 220 },
-  backflip: { id: 'backflip', label: 'BACKFLIP', duration: 0.80, nitro: 36, cash: 380 },
-  grab:     { id: 'grab',     label: 'TAIL GRAB', duration: 0.56, nitro: 20, cash: 180 },
+  superman: { id: 'superman', label: 'SUPERMAN', duration: 0.70, nitro: 28, cash: 250 },
+  spin360:  { id: 'spin360',  label: '360 SPIN', duration: 0.62, nitro: 26, cash: 220 },
+  backflip: { id: 'backflip', label: 'BACKFLIP', duration: 0.78, nitro: 38, cash: 380 },
+  grab:     { id: 'grab',     label: 'TAIL GRAB', duration: 0.54, nitro: 22, cash: 180 },
 };
 
 const GRAVITY = 27.5;
@@ -26,7 +28,7 @@ const _ocean = { y: 0, nx: 0, ny: 1, nz: 0, vy: 0, crest: 0 };
 const _proj = {};
 const _sp = {};
 
-function createRacerState({ id, name, isPlayer, skiSpec, rivalSpec, startS, startLat, course }) {
+function createRacerState({ id, name, isPlayer, skiSpec, rivalSpec, startS, startLat, course, diff }) {
   const sp = sampleCourse(course, startS, {});
   const x = sp.x + sp.rx * startLat;
   const z = sp.z + sp.rz * startLat;
@@ -35,10 +37,10 @@ function createRacerState({ id, name, isPlayer, skiSpec, rivalSpec, startS, star
   const phys = isPlayer
     ? skiSpec.phys
     : {
-        topSpeed: 50.5 + rivalSpec.skill * 7.2,
-        nitroBonus: 14.0,
-        accel: 29.0 + rivalSpec.skill * 4.5,
-        turnRate: 2.35,
+        topSpeed: (46.5 + rivalSpec.skill * 7.8) * diff.aiSpeedMul,
+        nitroBonus: 13.0 * diff.aiSpeedMul,
+        accel: (27.5 + rivalSpec.skill * 4.5) * Math.max(0.9, diff.aiSpeedMul),
+        turnRate: 2.38,
         carveGrip: 5.2,
         rampBoost: 1.08,
         stuntSpeed: 1.05,
@@ -71,10 +73,10 @@ function createRacerState({ id, name, isPlayer, skiSpec, rivalSpec, startS, star
     onRampId: -1,
     rampCooldown: 0,
     // Hydro Nitro (0..100)
-    nitro: isPlayer ? 45 : 30,
+    nitro: isPlayer ? 55 : 25,
     nitroActive: false,
     // Mid-Air Stunts
-    stunt: null, // { id, label, progress, duration, nitro, cash, completed }
+    stunt: null,
     stuntCount: 0,
     stuntCash: 0,
     bailTimer: 0,
@@ -84,6 +86,10 @@ function createRacerState({ id, name, isPlayer, skiSpec, rivalSpec, startS, star
     buoysHit: 0,
     buoysTotal: 0,
     nextBuoyIdx: 0,
+    // Navigation guidance for HUD overhead arrow & Wrong-Way alert
+    navAngle: 0,
+    wrongWay: false,
+    wrongWayTimer: 0,
     // Lap & race progress
     s: wrapS(course, startS),
     prevS: wrapS(course, startS),
@@ -95,34 +101,35 @@ function createRacerState({ id, name, isPlayer, skiSpec, rivalSpec, startS, star
     finished: false,
     finishTime: null,
     place: id + 1,
-    // AI lane target & timers
+    // AI state
     aiTargetLat: startLat,
     aiLaneTimer: 0.6 + id * 0.35,
-    aiNitroTimer: 2 + id * 1.1,
+    aiNitroTimer: 2.5 + id * 1.1,
     bumpCooldown: 0,
     wakeJostle: 0,
-    // Visual mesh handle (attached by main.js)
     meshApi: null,
   };
 }
 
 export function createRaceSimulation(course, playerSkiSpec) {
+  const diff = getDifficulty();
   const racers = [];
-  // Staggered 2-row starting grid behind start gantry arch (s = totalLen - 26 .. -8)
-  // Player starts in P5 (middle of pack) for instant thrilling overtakes!
+
+  // Staggered 2-row starting grid behind Start/Finish arch
   const gridSlots = [
-    { sOff: -12, lat: -11 },
+    { sOff: -12, lat: -10.5 },
     { sOff: -12, lat: -3.5 },
-    { sOff: -12, lat: 4.0 },
-    { sOff: -12, lat: 11.5 },
-    { sOff: -24, lat: -7.5 }, // Player slot!
-    { sOff: -24, lat: 0.5 },
-    { sOff: -24, lat: 8.5 },
-    { sOff: -24, lat: -14.5 },
+    { sOff: -12, lat: 3.5 },
+    { sOff: -12, lat: 10.5 },
+    { sOff: -23, lat: -8.0 },
+    { sOff: -23, lat: 0.0 },
+    { sOff: -23, lat: 8.0 },
+    { sOff: -23, lat: -14.0 },
   ];
 
-  // Player is racers[0]
-  const pSlot = gridSlots[4];
+  const playerSlotIdx = diff.startSlot != null ? diff.startSlot : 2;
+  const pSlot = gridSlots[playerSlotIdx];
+
   racers.push(
     createRacerState({
       id: 0,
@@ -133,36 +140,39 @@ export function createRaceSimulation(course, playerSkiSpec) {
       startS: wrapS(course, course.totalLen + pSlot.sOff),
       startLat: pSlot.lat,
       course,
+      diff,
     })
   );
 
-  // 7 AI Rivals
-  const aiSlots = [0, 1, 2, 3, 5, 6, 7];
-  for (let i = 0; i < AI_RIVALS.length; i++) {
-    const slot = gridSlots[aiSlots[i]];
+  let aiIdx = 0;
+  for (let slotIdx = 0; slotIdx < gridSlots.length && aiIdx < AI_RIVALS.length; slotIdx++) {
+    if (slotIdx === playerSlotIdx) continue;
+    const slot = gridSlots[slotIdx];
     racers.push(
       createRacerState({
-        id: i + 1,
-        name: AI_RIVALS[i].name,
+        id: aiIdx + 1,
+        name: AI_RIVALS[aiIdx].name,
         isPlayer: false,
         skiSpec: null,
-        rivalSpec: AI_RIVALS[i],
+        rivalSpec: AI_RIVALS[aiIdx],
         startS: wrapS(course, course.totalLen + slot.sOff),
         startLat: slot.lat,
         course,
+        diff,
       })
     );
+    aiIdx++;
   }
 
-  // Initialize player's nextBuoyIdx to first buoy after s=0
   racers[0].nextBuoyIdx = 0;
 
   return {
     course,
+    diff,
     racers,
     player: racers[0],
     raceTime: 0,
-    events: [], // per-frame UI/audio/FX events drained by main.js
+    events: [],
   };
 }
 
@@ -174,7 +184,7 @@ function angleDiff(target, current) {
 }
 
 export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
-  const { course, racers, player, events } = sim;
+  const { course, racers, player, events, diff } = sim;
   events.length = 0;
 
   if (racingActive) {
@@ -197,7 +207,6 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
     let wantStunt = null;
 
     if (!racingActive) {
-      // Idle bobbing on start grid before GO!
       throttle = 0;
     } else if (r.isPlayer && !r.finished) {
       throttle = input.gas ? 1 : 0;
@@ -206,9 +215,21 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
       wantNitro = !!input.nitro;
       wantJump = !!input.jumpJustPressed;
       wantStunt = input.stuntJustPressed || null;
+
+      // Gentle course-alignment assist on Rookie (and subtle on Pro) so bends feel intuitive & smooth!
+      if (diff.steerAssist > 0.01 && !r.airborne && r.speed > 8) {
+        const lookS = r.s + 34 + r.speed * 0.38;
+        sampleCourse(course, lookS, _sp);
+        const aimHeading = Math.atan2(_sp.x - r.x, _sp.z - r.z);
+        const err = angleDiff(aimHeading, r.heading);
+        // err > 0 => course is to the LEFT => steer negative; err < 0 => course is to the RIGHT => steer positive
+        const assistSteer = Math.max(-0.55, Math.min(0.55, -err * 0.85));
+        // Only apply strongly when player isn't actively turning away, or when heading far off course
+        const weight = Math.abs(steer) < 0.1 ? diff.steerAssist : diff.steerAssist * 0.28;
+        steer = Math.max(-1, Math.min(1, steer + assistSteer * weight));
+      }
     } else {
-      // Smart AI Rival Controller (also drives player ski smoothly after crossing finish line)
-      const ai = computeAIControls(r, player, course, dt);
+      const ai = computeAIControls(r, player, course, dt, diff);
       throttle = ai.throttle;
       brake = ai.brake;
       steer = ai.steer;
@@ -226,10 +247,9 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
       r.nitroActive = false;
     }
     if (r.nitroActive) {
-      r.nitro = Math.max(0, r.nitro - dt * 26.5);
+      r.nitro = Math.max(0, r.nitro - dt * 24.5);
     } else if (racingActive && !r.airborne) {
-      // Slow passive trickle regen while racing at speed
-      r.nitro = Math.min(100, r.nitro + dt * 1.4);
+      r.nitro = Math.min(100, r.nitro + dt * (r.isPlayer ? diff.nitroRegen : 1.4));
     }
 
     // ---- 3. Sample Synchronized Gerstner Ocean Surface
@@ -237,18 +257,17 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
     let surfaceY = _ocean.y;
     let onRamp = null;
 
-    // Check Floating Jump Ramps!
     for (let k = 0; k < course.ramps.length; k++) {
       const rm = course.ramps[k];
       const dx = r.x - rm.x;
       const dz = r.z - rm.z;
       const along = dx * rm.tx + dz * rm.tz;
       const across = dx * rm.rx + dz * rm.rz;
-      if (Math.abs(across) <= rm.width * 0.58 && along >= -rm.length * 0.55 && along <= rm.length * 0.58) {
+      if (Math.abs(across) <= rm.width * 0.62 && along >= -rm.length * 0.55 && along <= rm.length * 0.58) {
         const rampBaseY = sampleOcean(rm.x, rm.z, {}, waveTime).y * 0.75;
         const frac = Math.max(0, Math.min(1, (along + rm.length * 0.5) / rm.length));
         const rampTopY = rampBaseY + 0.14 + frac * (rm.height - 0.14);
-        if (r.y <= rampTopY + 1.35 && r.vy <= 14) {
+        if (r.y <= rampTopY + 1.4 && r.vy <= 14) {
           surfaceY = Math.max(surfaceY, rampTopY);
           onRamp = { rm, frac, rampTopY };
         }
@@ -259,50 +278,43 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
     const fwdX = Math.sin(r.heading);
     const fwdZ = Math.cos(r.heading);
 
-    // Slalom Combo top-speed reward (+3.5% per combo level up to x5!)
-    const comboMult = 1.0 + Math.min(5, r.slalomCombo) * 0.035;
-    const bailMult = r.bailTimer > 0 ? 0.42 : 1.0;
+    const comboMult = 1.0 + Math.min(5, r.slalomCombo) * 0.036;
+    const bailMult = r.bailTimer > 0 ? 0.52 : 1.0;
     const maxSpd =
       (r.phys.topSpeed * comboMult + (r.nitroActive ? r.phys.nitroBonus : 0)) * bailMult;
 
     if (!r.airborne) {
-      // Turning: steer > 0 (RIGHT) decreases heading; steer < 0 (LEFT) increases heading
-      const spdTurnFactor = 0.45 + 0.55 * Math.min(1, r.speed / 22);
-      const turnRate = r.phys.turnRate * spdTurnFactor * (brake ? 1.24 : 1.0);
+      const spdTurnFactor = 0.48 + 0.52 * Math.min(1, r.speed / 20);
+      const turnRate = r.phys.turnRate * spdTurnFactor * (brake ? 1.25 : 1.0);
       r.heading -= r.steerSmooth * turnRate * dt;
 
       const nFwdX = Math.sin(r.heading);
       const nFwdZ = Math.cos(r.heading);
-      // Forward thrust + water drag
       const accelForce =
-        throttle * r.phys.accel * (r.nitroActive ? 1.72 : 1.0) * bailMult -
-        brake * 28.0;
+        throttle * r.phys.accel * (r.nitroActive ? 1.75 : 1.0) * bailMult -
+        brake * 27.0;
 
-      // Project current horizontal velocity onto forward & lateral axes for juicy carving drift!
       let vFwd = r.vx * nFwdX + r.vz * nFwdZ;
       let vRight = r.vx * -nFwdZ + r.vz * nFwdX;
 
       vFwd += accelForce * dt;
-      // Hydrodynamic drag (carving slightly scrubs speed unless boosting)
-      const carveDrag = 1.0 + Math.abs(r.steerSmooth) * 0.14;
-      vFwd -= vFwd * (0.48 * carveDrag) * dt;
+      const carveDrag = 1.0 + Math.abs(r.steerSmooth) * 0.12;
+      vFwd -= vFwd * (0.46 * carveDrag) * dt;
       if (vFwd > maxSpd) vFwd += (maxSpd - vFwd) * Math.min(1, dt * 4.5);
       if (vFwd < -4) vFwd = -4;
 
-      // Sponson lateral grip: bites cleanly into the water with slight drift slide
       vRight *= Math.max(0, 1 - r.phys.carveGrip * dt);
 
       r.vx = nFwdX * vFwd + -nFwdZ * vRight;
       r.vz = nFwdZ * vFwd + nFwdX * vRight;
     } else {
-      // Mid-air subtle yaw control + gentle air drag
       r.heading -= r.steerSmooth * r.phys.turnRate * 0.36 * dt;
       if (r.nitroActive) {
         r.vx += fwdX * 12.0 * dt;
         r.vz += fwdZ * 12.0 * dt;
       }
-      r.vx *= 1 - dt * 0.16;
-      r.vz *= 1 - dt * 0.16;
+      r.vx *= 1 - dt * 0.15;
+      r.vz *= 1 - dt * 0.15;
     }
 
     r.x += r.vx * dt;
@@ -314,9 +326,8 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
       r.y = onRamp.rampTopY + 0.16;
       r.airborne = false;
       r.onRampId = onRamp.rm.id;
-      // Ramp lip launch when reaching top 18% of ramp at speed!
-      if (onRamp.frac > 0.80 && r.speed > 18) {
-        const launchV = (12.8 + r.speed * 0.23) * r.phys.rampBoost;
+      if (onRamp.frac > 0.78 && r.speed > 17) {
+        const launchV = (13.2 + r.speed * 0.23) * r.phys.rampBoost;
         r.vy = Math.max(r.vy, launchV);
         r.airborne = true;
         r.airTime = 0;
@@ -334,8 +345,7 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
       const heightAboveWater = r.y - surfaceY;
       if (heightAboveWater > r.peakAirH) r.peakAirH = heightAboveWater;
 
-      // Trigger Mid-Air Stunt!
-      if (wantStunt && !r.stunt && r.airTime > 0.06 && (heightAboveWater > 1.35 || r.vy > 3.5)) {
+      if (wantStunt && !r.stunt && r.airTime > 0.05 && (heightAboveWater > 1.25 || r.vy > 3.2)) {
         const def = STUNT_DEFS[wantStunt];
         if (def) {
           r.stunt = {
@@ -353,7 +363,6 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
         }
       }
 
-      // Advance active stunt
       if (r.stunt) {
         r.stunt.progress += dt / r.stunt.duration;
         if (r.stunt.progress >= 1.0 && !r.stunt.completed) {
@@ -362,7 +371,6 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
         }
       }
 
-      // Splashdown check!
       if (r.y <= surfaceY + 0.12 && r.vy <= 0) {
         const impact = Math.min(1.4, Math.abs(r.vy) / 14.0);
         r.y = surfaceY + 0.12;
@@ -370,8 +378,8 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
         r.airborne = false;
 
         if (r.stunt) {
-          // Generous 82% completion forgiveness so stunts feel responsive and fun!
-          if (r.stunt.completed || r.stunt.progress >= 0.82) {
+          const minProg = diff.id === 'rookie' ? 0.72 : 0.82;
+          if (r.stunt.completed || r.stunt.progress >= minProg) {
             r.nitro = Math.min(100, r.nitro + r.stunt.nitro);
             r.stuntCount++;
             r.stuntCash += r.stunt.cash;
@@ -388,10 +396,9 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
               });
             }
           } else {
-            // Landed mid-stunt -> splashy bail!
-            r.bailTimer = 1.1;
-            r.vx *= 0.48;
-            r.vz *= 0.48;
+            r.bailTimer = 0.95;
+            r.vx *= 0.55;
+            r.vz *= 0.55;
             r.slalomCombo = 0;
             if (r.isPlayer) {
               events.push({
@@ -404,9 +411,8 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
             }
           }
           r.stunt = null;
-        } else if (r.airTime > 0.32) {
-          // Regular big air landing awards small Nitro + satisfying splash!
-          const airBonus = Math.min(12, Math.round(r.airTime * 6));
+        } else if (r.airTime > 0.30) {
+          const airBonus = Math.min(14, Math.round(r.airTime * 7));
           r.nitro = Math.min(100, r.nitro + airBonus);
           if (r.isPlayer) {
             events.push({
@@ -422,7 +428,6 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
         r.airTime = 0;
       }
     } else {
-      // On water: spring-damper buoyancy synced to Gerstner ocean height!
       const targetY = surfaceY + 0.14;
       const errY = targetY - r.y;
       r.vy += errY * 62.0 * dt;
@@ -430,14 +435,13 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
       r.y += r.vy * dt;
       if (r.y < surfaceY - 0.45) r.y = surfaceY - 0.45;
 
-      // Wave-Crest & Wake-Pop Launch!
       const waveSlopeFwd = -(_ocean.nx * fwdX + _ocean.nz * fwdZ);
       const bigCrestLaunch =
         r.speed > 34 && _ocean.crest > 0.44 && waveSlopeFwd > 0.11 && _ocean.vy > 0.15;
-      const manualWavePop = wantJump && r.speed > 20;
+      const manualWavePop = wantJump && r.speed > 18;
 
       if (bigCrestLaunch || manualWavePop) {
-        const popBoost = manualWavePop ? 11.8 + _ocean.crest * 4.5 : 8.2 + _ocean.crest * 6.5;
+        const popBoost = manualWavePop ? 12.2 + _ocean.crest * 4.5 : 8.2 + _ocean.crest * 6.5;
         r.vy = Math.max(r.vy, popBoost * r.phys.rampBoost);
         r.airborne = true;
         r.airTime = 0;
@@ -448,20 +452,19 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
       }
     }
 
-    // ---- 6. Hull Pitch & Roll Alignment (wave normal + carving bank + air arc)
+    // ---- 6. Hull Pitch & Roll Alignment
     const fwdSlope = -(_ocean.nx * fwdX + _ocean.nz * fwdZ);
     const sideSlope = _ocean.nx * -fwdZ + _ocean.nz * fwdX;
     let targetPitch = 0;
     let targetRoll = 0;
 
     if (onRamp) {
-      targetPitch = -0.26; // nose angled up the ramp!
+      targetPitch = -0.26;
       targetRoll = r.steerSmooth * 0.25;
     } else if (r.airborne) {
       targetPitch = Math.max(-0.52, Math.min(0.45, -r.vy * 0.032));
       targetRoll = r.steerSmooth * 0.35;
     } else {
-      // Nose rises slightly with throttle & nitro ("planing") + rides Gerstner wave slope
       targetPitch = -fwdSlope * 0.85 - (r.speed / 58) * 0.11 - (r.nitroActive ? 0.08 : 0);
       targetRoll = r.steerSmooth * 0.56 + sideSlope * 0.45 + Math.sin(waveTime * 14) * r.wakeJostle * 0.16;
     }
@@ -469,7 +472,7 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
     r.pitch += (targetPitch - r.pitch) * Math.min(1, dt * 8.5);
     r.roll += (targetRoll - r.roll) * Math.min(1, dt * 9.5);
 
-    // ---- 7. Course Projection, Soft Boundary Corridor & Lap Counting
+    // ---- 7. Course Projection, Buoy Lane Rope Cushion & Lap Counting
     projectToCourse(course, r.x, r.z, r.s, _proj);
     const prevS = r.s;
     const ds = deltaS(course, prevS, _proj.s);
@@ -477,22 +480,51 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
     r.s = _proj.s;
     r.lateral = _proj.lateral;
 
-    // Gentle buoyant ocean current guides racer back if drifting far outside course buoys
-    const maxLat = course.width * 0.72;
+    // Buoyant lane-rope barrier keeps racers smoothly inside the marked water channel!
+    const maxLat = course.width * 0.55;
     if (Math.abs(r.lateral) > maxLat) {
       const over = Math.abs(r.lateral) - maxLat;
       const pushDir = r.lateral > 0 ? -1 : 1;
-      r.x += _proj.rx * pushDir * over * 0.38;
-      r.z += _proj.rz * pushDir * over * 0.38;
-      // Nudge velocity gently inward
+      r.x += _proj.rx * pushDir * over * 0.65;
+      r.z += _proj.rz * pushDir * over * 0.65;
       const outVel = r.vx * _proj.rx * Math.sign(r.lateral) + r.vz * _proj.rz * Math.sign(r.lateral);
       if (outVel > 0) {
-        r.vx -= _proj.rx * Math.sign(r.lateral) * outVel * 0.55;
-        r.vz -= _proj.rz * Math.sign(r.lateral) * outVel * 0.55;
+        r.vx -= _proj.rx * Math.sign(r.lateral) * outVel * 0.82;
+        r.vz -= _proj.rz * Math.sign(r.lateral) * outVel * 0.82;
+      }
+      // Gently align heading back parallel with the lane rope so players never get stuck sideways!
+      if (r.isPlayer) {
+        const courseH = Math.atan2(_proj.tx, _proj.tz);
+        const hErr = angleDiff(courseH, r.heading);
+        if (Math.abs(hErr) < 1.8) {
+          r.heading += hErr * Math.min(1, dt * 2.8);
+        }
       }
     }
 
-    // Accumulate forward progress & detect Finish Line crossings!
+    // Compute live Overhead Direction Arrow & Wrong-Way Alert for the player!
+    if (r.isPlayer) {
+      const guidePt = sampleCourse(course, r.s + 52, _sp);
+      const targetH = Math.atan2(guidePt.x - r.x, guidePt.z - r.z);
+      // angleDiff > 0 means target is to the LEFT; negate so positive navAngle = RIGHT for CSS rotate()!
+      const relRight = -angleDiff(targetH, r.heading);
+      r.navAngle = relRight;
+
+      const courseH = Math.atan2(_proj.tx, _proj.tz);
+      const trackErr = Math.abs(angleDiff(courseH, r.heading));
+      if (racingActive && !r.finished && trackErr > 1.9) {
+        r.wrongWayTimer += dt;
+        r.wrongWay = r.wrongWayTimer > 0.35;
+        // On Rookie, gently help spin player back around if stuck facing backwards > 1.8s
+        if (diff.id === 'rookie' && r.wrongWayTimer > 1.8) {
+          r.heading += angleDiff(courseH, r.heading) * Math.min(1, dt * 2.5);
+        }
+      } else {
+        r.wrongWayTimer = 0;
+        r.wrongWay = false;
+      }
+    }
+
     if (racingActive) {
       r.totalProgress += ds;
       const newLap = Math.floor(r.totalProgress / course.totalLen) + 1;
@@ -524,7 +556,7 @@ export function stepRaceSimulation(sim, dt, waveTime, input, racingActive) {
     }
   }
 
-  // ---- 9. Wake-Spray Bumping Collisions & Wake Turbulence Between All 8 Racers!
+  // ---- 9. Wake-Spray Bumping Collisions & Wake Turbulence
   if (racingActive) {
     resolveRacerInteractions(racers, events);
   }
@@ -564,23 +596,19 @@ function checkBuoySlalom(player, course, prevS, curS, events) {
 
   for (let i = 0; i < buoys.length; i++) {
     const b = buoys[i];
-    // Did player cross b.s on this frame?
     const dPrev = deltaS(course, prevS, b.s);
     const dCur = deltaS(course, curS, b.s);
     if (dPrev >= 0 && dCur < 0 && dPrev < 35) {
-      // Determine which side of the buoy the player passed!
-      // relRight > 0 => player passed on the buoy's RIGHT (required for RED buoys)
-      // relRight < 0 => player passed on the buoy's LEFT (required for YELLOW buoys)
       const relRight = (player.x - b.x) * b.rx + (player.z - b.z) * b.rz;
       const dist = Math.abs(relRight);
-      const correct = (b.side === 'right' && relRight > -0.6) || (b.side === 'left' && relRight < 0.6);
+      const correct = (b.side === 'right' && relRight > -1.0) || (b.side === 'left' && relRight < 1.0);
 
       player.buoysTotal++;
-      if (correct && dist < course.width * 0.75) {
+      if (correct && dist < course.width * 0.72) {
         player.slalomCombo = Math.min(5, player.slalomCombo + 1);
         if (player.slalomCombo > player.maxCombo) player.maxCombo = player.slalomCombo;
         player.buoysHit++;
-        const nitroGain = 6 + player.slalomCombo * 2.5;
+        const nitroGain = 7 + player.slalomCombo * 2.5;
         player.nitro = Math.min(100, player.nitro + nitroGain);
         events.push({
           type: 'buoy_hit',
@@ -600,7 +628,6 @@ function checkBuoySlalom(player, course, prevS, curS, events) {
     }
   }
 
-  // Update next upcoming buoy highlight for the player
   let bestIdx = 0;
   let bestAhead = Infinity;
   for (let i = 0; i < buoys.length; i++) {
@@ -624,7 +651,6 @@ function resolveRacerInteractions(racers, events) {
       const distSq = dx * dx + dz * dz;
       const minDist = 2.65;
 
-      // 1. Direct Hull-to-Hull Wake-Spray Bumping!
       if (distSq < minDist * minDist && distSq > 1e-4 && Math.abs(a.y - b.y) < 2.2) {
         const dist = Math.sqrt(distSq);
         const nx = dx / dist;
@@ -644,7 +670,7 @@ function resolveRacerInteractions(racers, events) {
         const relVz = b.vz - a.vz;
         const sepVel = relVx * nx + relVz * nz;
         if (sepVel < 2.0) {
-          const impulse = (7.5 - sepVel) * 0.78;
+          const impulse = (7.2 - sepVel) * 0.76;
           a.vx -= nx * impulse * aShare;
           a.vz -= nz * impulse * aShare;
           b.vx += nx * impulse * bShare;
@@ -652,8 +678,8 @@ function resolveRacerInteractions(racers, events) {
         }
 
         if (a.bumpCooldown <= 0 || b.bumpCooldown <= 0) {
-          a.bumpCooldown = 0.42;
-          b.bumpCooldown = 0.42;
+          a.bumpCooldown = 0.45;
+          b.bumpCooldown = 0.45;
           a.wakeJostle = 1.0;
           b.wakeJostle = 1.0;
           events.push({
@@ -664,9 +690,7 @@ function resolveRacerInteractions(racers, events) {
             z: (a.z + b.z) * 0.5,
           });
         }
-      }
-      // 2. Crossing Directly Behind Another Racer's Rooster-Tail Wake!
-      else if (a.isPlayer && !a.airborne && !b.airborne && b.speed > 20 && distSq < 18 * 18) {
+      } else if (a.isPlayer && !a.airborne && !b.airborne && b.speed > 20 && distSq < 18 * 18) {
         const bFwdX = Math.sin(b.heading);
         const bFwdZ = Math.cos(b.heading);
         const behind = -(a.x - b.x) * bFwdX - (a.z - b.z) * bFwdZ;
@@ -682,15 +706,13 @@ function resolveRacerInteractions(racers, events) {
   }
 }
 
-function computeAIControls(r, player, course, dt) {
-  // Smooth lookahead steering along the spline + buoy slalom weaving + ramp seeking!
+function computeAIControls(r, player, course, dt, diff) {
   r.aiLaneTimer -= dt;
   if (r.aiLaneTimer <= 0) {
     r.aiLaneTimer = 1.6 + Math.random() * 2.2;
-    r.aiTargetLat = (Math.random() - 0.5) * (course.width * 0.52);
+    r.aiTargetLat = (Math.random() - 0.5) * (course.width * 0.48);
   }
 
-  // Check if a buoy is right ahead and aim cleanly past its correct side!
   let targetLat = r.aiTargetLat;
   for (let i = 0; i < course.buoys.length; i++) {
     const b = course.buoys[i];
@@ -700,7 +722,6 @@ function computeAIControls(r, player, course, dt) {
       break;
     }
   }
-  // Occasionally line up for floating jump ramps!
   for (let i = 0; i < course.ramps.length; i++) {
     const rm = course.ramps[i];
     const ahead = deltaS(course, r.s, rm.s);
@@ -715,36 +736,35 @@ function computeAIControls(r, player, course, dt) {
   const aimX = _sp.x + _sp.rx * targetLat;
   const aimZ = _sp.z + _sp.rz * targetLat;
   const desiredH = Math.atan2(aimX - r.x, aimZ - r.z);
-  const diff = angleDiff(desiredH, r.heading);
+  const d = angleDiff(desiredH, r.heading);
+  const steer = Math.max(-1, Math.min(1, -d * 1.9));
 
-  // diff > 0 means desired is LEFT -> steer negative!
-  const steer = Math.max(-1, Math.min(1, -diff * 1.9));
-
-  // Competitive gentle rubber-banding so the 7 rivals keep races super exciting!
+  // Tight exciting pack racing! Leaders never run away out of sight; clean driving earns 1st!
   let throttle = 1.0;
   let nitro = false;
   if (!r.isPlayer) {
     const gap = r.totalProgress - player.totalProgress;
-    if (gap > 85) {
-      throttle = 0.84;
+    if (gap > diff.aiRubberGap) {
+      throttle = diff.aiRubberLead;
+    } else if (gap > diff.aiRubberGap * 0.45) {
+      throttle = (1.0 + diff.aiRubberLead) * 0.5;
     } else if (gap < -65) {
       throttle = 1.0;
-      if (r.nitro > 18) nitro = true;
+      if (r.nitro > 22 && diff.id !== 'rookie') nitro = true;
     } else {
       r.aiNitroTimer -= dt;
-      if (r.aiNitroTimer <= 0 && Math.abs(steer) < 0.25 && r.nitro > 35) {
+      if (r.aiNitroTimer <= 0 && Math.abs(steer) < 0.25 && r.nitro > 40 && diff.id !== 'rookie') {
         nitro = true;
-        if (r.aiNitroTimer < -1.4) r.aiNitroTimer = 4.5 + Math.random() * 4.5;
+        if (r.aiNitroTimer < -1.2) r.aiNitroTimer = 5.0 + Math.random() * 5.0;
       }
     }
   }
 
-  // AI performs occasional stylish stunts off big ramps!
   let stunt = null;
   if (r.airborne && !r.stunt && r.airTime > 0.14 && r.vy > 4.5 && Math.random() < 0.08) {
     const keys = ['superman', 'spin360', 'backflip', 'grab'];
     stunt = keys[r.id % keys.length];
   }
 
-  return { throttle, brake: Math.abs(diff) > 1.25 ? 0.5 : 0, steer, nitro, stunt };
+  return { throttle, brake: Math.abs(d) > 1.25 ? 0.5 : 0, steer, nitro, stunt };
 }

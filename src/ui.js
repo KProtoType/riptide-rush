@@ -8,7 +8,13 @@
 
 import { VENUES, LAPS_PER_RACE } from './venues.js';
 import { JET_SKIS, formatTime } from './skis.js';
-import { WEATHER_LABELS, QUALITY_TIERS, PERF } from './perf.js';
+import {
+  WEATHER_LABELS,
+  QUALITY_TIERS,
+  DIFFICULTY_TIERS,
+  DIFFICULTY_ORDER,
+  PERF,
+} from './perf.js';
 
 const ORDINALS = ['1ST', '2ND', '3RD', '4TH', '5TH', '6TH', '7TH', '8TH'];
 
@@ -62,6 +68,8 @@ export function createUI(callbacks) {
         </div>
       </div>
 
+      <div class="diff-bar" id="diff-bar"></div>
+
       <div class="venue-grid" id="venue-cards"></div>
 
       <div class="bottom-bar">
@@ -108,6 +116,18 @@ export function createUI(callbacks) {
           <span class="dot red"></span>PASS RIGHT &nbsp; <span class="dot yellow"></span>PASS LEFT
         </div>
       </div>
+
+      <!-- Glowing Arcade Overhead Direction Arrow -->
+      <div class="hud-nav" id="h-nav">
+        <div class="nav-arrow-wrap" id="h-nav-arrow">
+          <svg viewBox="0 0 64 64" width="54" height="54" aria-hidden="true">
+            <polygon points="32,4 58,48 40,42 40,60 24,60 24,42 6,48" fill="currentColor" stroke="#041322" stroke-width="4" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="nav-label" id="h-nav-label">STRAIGHT</div>
+      </div>
+
+      <div class="hud-wrong-way" id="h-wrong-way" hidden>WRONG WAY — TURN AROUND!</div>
 
       <div class="hud-map glass">
         <canvas id="minimap" width="144" height="144"></canvas>
@@ -209,6 +229,11 @@ export function createUI(callbacks) {
     const sc = e.target.closest('[data-ski]');
     if (sc) {
       callbacks.onSelectSki(Number(sc.dataset.ski));
+      return;
+    }
+    const dc = e.target.closest('[data-diff]');
+    if (dc && callbacks.onSelectDifficulty) {
+      callbacks.onSelectDifficulty(dc.dataset.diff);
     }
   });
 
@@ -221,6 +246,7 @@ export function createUI(callbacks) {
   };
 
   const els = {
+    diffBar: document.getElementById('diff-bar'),
     venueCards: document.getElementById('venue-cards'),
     selCash: document.getElementById('sel-cash'),
     garCash: document.getElementById('gar-cash'),
@@ -236,6 +262,10 @@ export function createUI(callbacks) {
     hCombo: document.getElementById('h-combo'),
     hSlalomBox: document.getElementById('h-slalom-box'),
     hBuoyHint: document.getElementById('h-buoy-hint'),
+    hNav: document.getElementById('h-nav'),
+    hNavArrow: document.getElementById('h-nav-arrow'),
+    hNavLabel: document.getElementById('h-nav-label'),
+    hWrongWay: document.getElementById('h-wrong-way'),
     hCountdown: document.getElementById('h-countdown'),
     hToasts: document.getElementById('h-toasts'),
     hStuntBar: document.getElementById('h-stunt-bar'),
@@ -274,6 +304,17 @@ export function createUI(callbacks) {
     const cashStr = `$${save.cash.toLocaleString()}`;
     els.selCash.textContent = cashStr;
     els.selSkiChip.textContent = `ACTIVE SKI: ${JET_SKIS[save.selectedSki].name}`;
+
+    // Difficulty selector pills (ROOKIE / PRO / ACE)
+    const curDiff = DIFFICULTY_TIERS[PERF.difficulty] || DIFFICULTY_TIERS.rookie;
+    els.diffBar.innerHTML = `
+      <span class="diff-lbl">DIFFICULTY:</span>
+      ${DIFFICULTY_ORDER.map((id) => {
+        const d = DIFFICULTY_TIERS[id];
+        return `<button type="button" class="diff-pill ${id === curDiff.id ? 'on' : ''}" data-diff="${id}">${d.label}</button>`;
+      }).join('')}
+      <span class="diff-desc">${curDiff.desc}</span>
+    `;
 
     els.venueCards.innerHTML = VENUES.map((v, i) => {
       const rec = save.records[v.id] || {};
@@ -388,13 +429,30 @@ export function createUI(callbacks) {
     els.hCombo.textContent = p.slalomCombo > 0 ? `x${comboMult}` : 'x1';
     els.hSlalomBox.classList.toggle('hot', p.slalomCombo >= 3);
 
+    // Overhead Glowing Arcade Direction Arrow + Wrong-Way Alert!
+    const deg = Math.round((p.navAngle * 180) / Math.PI);
+    els.hNavArrow.style.transform = `rotate(${deg}deg)`;
+    const absDeg = Math.abs(deg);
+    els.hNav.classList.toggle('turn', absDeg >= 24 && !p.wrongWay);
+    els.hNav.classList.toggle('warn', p.wrongWay);
+    if (p.wrongWay) {
+      els.hNavLabel.textContent = 'TURN AROUND';
+    } else if (deg >= 24) {
+      els.hNavLabel.textContent = deg >= 52 ? 'SHARP RIGHT ▶' : 'BEAR RIGHT ▶';
+    } else if (deg <= -24) {
+      els.hNavLabel.textContent = deg <= -52 ? '◀ SHARP LEFT' : '◀ BEAR LEFT';
+    } else {
+      els.hNavLabel.textContent = 'FOLLOW GATES';
+    }
+    els.hWrongWay.hidden = !p.wrongWay;
+
     // Next buoy side cue
     const nextB = course.buoys[p.nextBuoyIdx];
     if (nextB) {
       const isRed = nextB.side === 'right';
       els.hBuoyHint.innerHTML = isRed
-        ? `<span class="dot red"></span>NEXT: PASS <b>RIGHT ▶</b>`
-        : `<span class="dot yellow"></span>NEXT: PASS <b>◀ LEFT</b>`;
+        ? `<span class="dot red"></span>NEXT BUOY: <b>RIGHT ▶</b>`
+        : `<span class="dot yellow"></span>NEXT BUOY: <b>◀ LEFT</b>`;
     }
 
     // Airborne Stunt Bar

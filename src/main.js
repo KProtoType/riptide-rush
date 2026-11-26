@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import {
   PERF,
+  setDifficulty,
   cycleQualityTier,
   cycleWeatherMode,
   WEATHER_LABELS,
@@ -314,6 +315,14 @@ const ui = createUI({
       ui.renderGarage(save.selectedSki, save);
     }
   },
+  onSelectDifficulty(diffId) {
+    audio.init();
+    audio.playMenu();
+    setDifficulty(diffId);
+    if (state === 'select') {
+      ui.renderVenueSelect(selectedVenueIdx, save);
+    }
+  },
   onCycleWeather: handleCycleWeather,
   onCycleQuality: handleCycleQuality,
   onToggleMute: handleToggleMute,
@@ -597,6 +606,7 @@ function tick(now) {
     _focus.set(ahead.x, 0, ahead.z);
 
     if (activeWorld) activeWorld.update(dt, wt, -1);
+    ocean.setPlayerWake(null);
     ocean.update(cam.position);
     sceneApi.follow(_focus, cam.position, 0, 0);
     audio.update({ active: false, stormAmt: PERF.weather === 'storm' ? 1 : 0 });
@@ -628,6 +638,7 @@ function tick(now) {
     _focus.set(gx, _oceanTmp.y, gz);
 
     if (activeWorld) activeWorld.update(dt, wt, -1);
+    ocean.setPlayerWake(null);
     ocean.update(cam.position);
     sceneApi.follow(_focus, cam.position, 0, 0);
     audio.update({ active: false, stormAmt: PERF.weather === 'storm' ? 1 : 0 });
@@ -649,6 +660,7 @@ function tick(now) {
           state = 'race';
           ui.setCountdown('GO!');
           audio.playCountdown(true);
+          ui.addToast('FOLLOW THE GATES & LANE ROPES  •  SHIFT = NITRO', 'info');
           setTimeout(() => ui.setCountdown(null), 850);
         }
       }
@@ -672,7 +684,8 @@ function tick(now) {
       }
     }
 
-    // Dynamic Chase Camera (pulls back & widens FOV during Hydro Nitro + lifts cleanly on big jumps!)
+    // Dynamic Heroic Chase Camera: slightly elevated so you see deep turquoise water,
+    // caustics, lane ropes, and upcoming checkpoint arches clearly ahead!
     const p = sim.player;
     const fwdX = Math.sin(p.heading);
     const fwdZ = Math.cos(p.heading);
@@ -681,14 +694,14 @@ function tick(now) {
     nitroGlowSmooth += (targetNitro - nitroGlowSmooth) * Math.min(1, dt * 6.5);
     camShake = Math.max(0, camShake - dt * 1.9);
 
-    const distBack = 9.2 + speedNorm * 2.1 + nitroGlowSmooth * 1.8 + (p.airborne ? 1.6 : 0);
-    const heightUp = 3.65 + speedNorm * 0.45 + (p.airborne ? 1.25 : 0);
-    const sideSwing = -p.steerSmooth * 1.65;
+    const distBack = 9.8 + speedNorm * 2.1 + nitroGlowSmooth * 1.8 + (p.airborne ? 1.7 : 0);
+    const heightUp = 4.65 + speedNorm * 0.55 + (p.airborne ? 1.35 : 0);
+    const sideSwing = -p.steerSmooth * 1.55;
     const rightX = -fwdZ;
     const rightZ = fwdX;
 
     const desiredCamX = p.x - fwdX * distBack + rightX * sideSwing;
-    const desiredCamY = Math.max(sampleOcean(p.x, p.z, _oceanTmp, wt).y + 2.0, p.y + heightUp);
+    const desiredCamY = Math.max(sampleOcean(p.x, p.z, _oceanTmp, wt).y + 2.4, p.y + heightUp);
     const desiredCamZ = p.z - fwdZ * distBack + rightZ * sideSwing;
 
     const camLerp = Math.min(1, dt * 8.0);
@@ -700,9 +713,9 @@ function tick(now) {
     const shakeY = (Math.random() - 0.5) * camShake * 0.42;
     cam.position.set(camPosSmooth.x + shakeX, camPosSmooth.y + shakeY, camPosSmooth.z);
 
-    const lookX = p.x + fwdX * 15.0;
-    const lookY = p.y + 1.35 + (p.airborne ? 0.45 : 0);
-    const lookZ = p.z + fwdZ * 15.0;
+    const lookX = p.x + fwdX * 18.0;
+    const lookY = p.y + 1.05 + (p.airborne ? 0.4 : 0);
+    const lookZ = p.z + fwdZ * 18.0;
     camLookSmooth.x += (lookX - camLookSmooth.x) * Math.min(1, dt * 11.0);
     camLookSmooth.y += (lookY - camLookSmooth.y) * Math.min(1, dt * 9.0);
     camLookSmooth.z += (lookZ - camLookSmooth.z) * Math.min(1, dt * 11.0);
@@ -713,6 +726,7 @@ function tick(now) {
     cam.updateProjectionMatrix();
 
     _focus.set(p.x, p.y, p.z);
+    ocean.setPlayerWake(p);
     ocean.update(cam.position);
     sceneApi.follow(_focus, cam.position, speedNorm, nitroGlowSmooth);
 
